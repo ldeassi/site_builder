@@ -41,6 +41,77 @@ export function getDownloadUrl(jobId: string) {
   return `${API_BASE}/api/job/${jobId}/download`
 }
 
+export function getDownloadSourceUrl(jobId: string) {
+  return `${API_BASE}/api/job/${jobId}/download-source`
+}
+
+export async function searchPlacesPage(opts: {
+  query: string
+  lat: number
+  lng: number
+  pageToken?: string | null
+  provider?: 'new' | 'legacy' | null
+  apiKey: string
+}) {
+  const res = await fetch(`${API_BASE}/api/places/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query: opts.query,
+      lat: opts.lat,
+      lng: opts.lng,
+      page_token: opts.pageToken || null,
+      provider: opts.provider || null,
+      api_key: opts.apiKey,
+      referer: typeof window !== 'undefined' ? window.location.origin + '/' : null,
+    }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(data.detail || `Places search failed: HTTP ${res.status}`)
+  }
+  return data as {
+    businesses: import('../types/places').DiscoveredBusiness[]
+    nextPageToken: string | null
+    hasNextPage: boolean
+    rawCount: number
+    provider: 'new' | 'legacy'
+    debugLine: string
+  }
+}
+
+export async function searchPlacesBulk(opts: {
+  locationName: string
+  lat: number
+  lng: number
+  maxResults?: number
+  apiKey: string
+}) {
+  const res = await fetch(`${API_BASE}/api/places/search-bulk`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      location_name: opts.locationName,
+      lat: opts.lat,
+      lng: opts.lng,
+      max_results: opts.maxResults ?? 500,
+      api_key: opts.apiKey,
+      referer: typeof window !== 'undefined' ? window.location.origin + '/' : null,
+    }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(data.detail || `Bulk places search failed: HTTP ${res.status}`)
+  }
+  return data as {
+    businesses: import('../types/places').DiscoveredBusiness[]
+    debugLines: string[]
+    errors: string[]
+    provider: 'new' | 'legacy'
+    rawGoogleLogs?: unknown[]
+  }
+}
+
 export async function deleteDeployedSite(projectName: string) {
   const res = await fetch(`${API_BASE}/api/site/${projectName}`, {
     method: 'DELETE',

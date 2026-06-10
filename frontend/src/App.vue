@@ -28,166 +28,30 @@
     </header>
 
     <!-- Main Content -->
-    <main class="flex-1 w-full" :class="store.phase === 'result' ? '' : 'max-w-6xl mx-auto px-6 py-8'">
+    <main class="flex-1 w-full" :class="store.phase === 'result' ? '' : 'max-w-7xl mx-auto px-6 py-8'">
 
-      <!-- INPUT PHASE -->
+      <!-- INPUT PHASE (Dashboard) -->
       <section v-if="store.phase === 'input'" class="space-y-8">
-        <!-- Hero -->
-        <div class="text-center mb-8 pt-8">
-          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-medium mb-6">
+        <div class="text-center mb-4 pt-4">
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-medium mb-4">
             <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-            AI-Powered Site Generation
+            Lead discovery & site builder
           </div>
-          <h2 class="text-4xl md:text-5xl font-bold text-white mb-3 tracking-tight">
-            Any Business, Any URL,<br>
-            <span class="bg-gradient-to-r from-cyan-400 to-emerald-400 bg-clip-text text-transparent">Get a Premium Website</span>
+          <h2 class="text-3xl md:text-4xl font-bold text-white mb-2 tracking-tight">
+            Find leads.
+            <span class="bg-gradient-to-r from-cyan-400 to-emerald-400 bg-clip-text text-transparent">Build sites.</span>
           </h2>
-          <p class="text-gray-400 text-lg max-w-2xl mx-auto">
-            Paste a Google Maps link or any website URL and generate a beautiful, client-ready React website with AI-generated content and images. Deploy instantly.
+          <p class="text-gray-400 max-w-2xl mx-auto">
+            Search businesses on the left, generate a React website on the right.
           </p>
         </div>
 
-        <!-- Input Card -->
-        <div class="max-w-3xl mx-auto">
-          <div class="bg-gray-800/50 rounded-2xl border border-gray-700/50 p-6 space-y-5">
-            <!-- Business Search (Places Autocomplete + Any URL) -->
-            <PlacesAutocomplete
-              :disabled="store.isGenerating"
-              @select="onPlaceSelect"
-              @website-url="onWebsiteUrl"
-              @clear="onPlaceClear"
-            />
-
-            <!-- Business Name & Category (shown for website-only URLs) -->
-            <transition name="slide-fade">
-              <div v-if="store.inputUrlType === 'website'" class="space-y-4">
-                <div class="grid grid-cols-2 gap-4">
-                  <div>
-                    <label class="block text-sm font-medium text-gray-300 mb-2">
-                      What's the business called?
-                    </label>
-                    <input
-                      v-model="store.businessNameInput"
-                      type="text"
-                      placeholder="e.g. Joe's Pizza"
-                      class="w-full px-4 py-3 rounded-xl bg-gray-900/50 border text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
-                      :class="store.businessNameInput.trim() ? 'border-gray-600' : 'border-cyan-500/40'"
-                      :disabled="store.isGenerating"
-                    />
-                  </div>
-                  <div>
-                    <label class="block text-sm font-medium text-gray-300 mb-2">
-                      Category
-                      <span class="text-gray-500 font-normal">(optional)</span>
-                    </label>
-                    <input
-                      v-model="store.businessCategoryInput"
-                      type="text"
-                      placeholder="e.g. Italian Restaurant"
-                      class="w-full px-4 py-3 rounded-xl bg-gray-900/50 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
-                      :disabled="store.isGenerating"
-                    />
-                  </div>
-                </div>
-                <!-- Cross-pollination hint -->
-                <div class="flex items-start gap-2 px-3 py-2 rounded-lg bg-gray-800/50 border border-gray-700/50">
-                  <svg class="w-3.5 h-3.5 text-cyan-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                  </svg>
-                  <p class="text-xs text-gray-400">
-                    <span class="text-gray-300">Want richer results?</span>
-                    Paste a Google Maps link instead to pull in real photos, reviews, hours, and contact info.
-                  </p>
-                </div>
-              </div>
-            </transition>
-
-            <!-- Website URL Enhancement (only when Maps URL is used) -->
-            <transition name="slide-fade">
-              <div v-if="store.inputUrlType === 'maps'" class="space-y-2">
-                <label class="block text-sm font-medium text-gray-300">
-                  Add their website for even better results
-                  <span class="text-gray-500 font-normal">(optional)</span>
-                </label>
-                <input
-                  v-model="store.websiteUrl"
-                  type="url"
-                  placeholder="https://example.com"
-                  class="w-full px-4 py-3 rounded-xl bg-gray-900/50 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all"
-                  :disabled="store.isGenerating"
-                />
-                <p class="text-xs text-gray-500 pl-1">We'll pull their real branding, colors, and images</p>
-              </div>
-            </transition>
-
-            <!-- Business Context (optional) -->
-            <div>
-              <label class="block text-sm font-medium text-gray-300 mb-2">
-                Business Context
-                <span class="text-gray-500 font-normal">(optional — helps AI write accurate content)</span>
-              </label>
-              <textarea
-                v-model="store.businessContext"
-                rows="3"
-                placeholder="e.g. Family-owned Italian restaurant since 1985, known for wood-fired pizza and homemade pasta. Open for lunch and dinner, with outdoor seating and private event space."
-                class="w-full px-4 py-3 rounded-xl bg-gray-900/50 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all resize-none"
-                :disabled="store.isGenerating"
-              ></textarea>
-            </div>
-
-            <!-- Template Selection -->
-            <TemplateCards
-              :selected="store.templateName"
-              @select="store.templateName = $event"
-            />
-
-            <!-- Cloudflare Turnstile (anti-abuse) -->
-            <div
-              v-if="turnstileSiteKey && !turnstileFailed"
-              ref="turnstileRef"
-              class="cf-turnstile flex justify-center"
-              :data-sitekey="turnstileSiteKey"
-              data-callback="onTurnstileSuccess"
-              data-error-callback="onTurnstileError"
-              data-theme="dark"
-              data-size="flexible"
-            ></div>
-
-            <!-- Generate Button -->
-            <button
-              @click="store.startGeneration()"
-              :disabled="!store.canGenerate || (turnstileSiteKey && !turnstileFailed && !store.turnstileToken)"
-              class="w-full py-4 rounded-xl font-bold text-lg transition-all duration-200 flex items-center justify-center gap-3"
-              :class="
-                !store.canGenerate
-                  ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 text-white shadow-lg shadow-cyan-600/20 hover:shadow-cyan-500/30 cursor-pointer hover:scale-[1.01] active:scale-[0.99]'
-              "
-            >
-              <svg v-if="!store.isGenerating" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              <svg v-else class="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none" />
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-              </svg>
-              {{ store.isGenerating ? 'Generating...' : 'Generate Site' }}
-            </button>
-          </div>
-
-          <!-- Feature chips -->
-          <div class="flex flex-wrap justify-center gap-3 mt-6">
-            <span class="px-3 py-1 rounded-full bg-gray-800/50 border border-gray-700/50 text-xs text-gray-400">AI Content</span>
-            <span class="px-3 py-1 rounded-full bg-gray-800/50 border border-gray-700/50 text-xs text-gray-400">Gemini Images</span>
-            <span class="px-3 py-1 rounded-full bg-gray-800/50 border border-gray-700/50 text-xs text-gray-400">React + Tailwind</span>
-            <span class="px-3 py-1 rounded-full bg-gray-800/50 border border-gray-700/50 text-xs text-gray-400">Auto Deploy</span>
-            <span class="px-3 py-1 rounded-full bg-gray-800/50 border border-gray-700/50 text-xs text-gray-400">SEO Optimized</span>
-          </div>
-        </div>
-
-        <!-- Site History Dashboard -->
+        <Dashboard />
         <SiteHistory />
       </section>
+
+      <!-- DISCOVERY PHASE (results page) -->
+      <BusinessDiscoveryPage v-if="store.phase === 'discovery'" />
 
       <!-- PROGRESS PHASE -->
       <ProgressPanel v-if="store.phase === 'progress'" />
@@ -239,7 +103,12 @@
               :href="store.downloadUrl"
               target="_blank"
               class="px-4 py-2 rounded-lg border border-gray-600 hover:border-gray-400 text-gray-300 hover:text-white text-sm font-semibold transition-all"
-            >Download</a>
+            >Download HTML</a>
+            <a
+              :href="store.downloadSourceUrl"
+              target="_blank"
+              class="px-4 py-2 rounded-lg border border-cyan-600/50 hover:border-cyan-400 text-cyan-300 hover:text-cyan-200 text-sm font-semibold transition-all"
+            >Download source</a>
             <button
               @click="store.resetToInput()"
               class="px-4 py-2 rounded-lg border border-gray-600 hover:border-gray-400 text-gray-300 hover:text-white text-sm font-semibold transition-all"
@@ -289,62 +158,21 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { useSiteBuilderStore } from './stores/siteBuilderStore'
-
-// Cloudflare Turnstile — site key is public (visible in page source by design)
-const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY || '0x4AAAAAACp0MDK6rlOaKzf4'
-const turnstileRef = ref<HTMLElement | null>(null)
-const turnstileFailed = ref(false)
 import DevicePreview from './components/DevicePreview.vue'
-import PlacesAutocomplete from './components/PlacesAutocomplete.vue'
+import Dashboard from './components/Dashboard.vue'
+import BusinessDiscoveryPage from './components/BusinessDiscoveryPage.vue'
 import ProgressPanel from './components/ProgressPanel.vue'
 import SiteHistory from './components/SiteHistory.vue'
-import SeoScorePanel from './components/SeoScorePanel.vue'
 import EditorPanel from './components/editor/EditorPanel.vue'
-import TemplateCards from './components/TemplateCards.vue'
 
 const store = useSiteBuilderStore()
-
-function onPlaceSelect(place: { name: string; address: string; placeId: string | null; mapsUrl: string }) {
-  store.setInputUrl(place.mapsUrl)
-}
-
-function onWebsiteUrl(url: string) {
-  store.setInputUrl(url)
-}
-
-function onPlaceClear() {
-  store.setInputUrl('')
-  store.businessNameInput = ''
-  store.businessCategoryInput = ''
-}
 
 onMounted(() => {
   store.initWebSocket()
   store.loadSiteHistory()
   store.loadTemplates()
-
-  // Load Cloudflare Turnstile script if configured
-  if (turnstileSiteKey) {
-    ;(window as any).onTurnstileSuccess = (token: string) => {
-      store.turnstileToken = token
-    }
-    ;(window as any).onTurnstileError = () => {
-      // If Turnstile fails to load (wrong domain, network issue), don't block the user
-      console.warn('[Turnstile] Verification failed — bypassing widget')
-      turnstileFailed.value = true
-    }
-    const script = document.createElement('script')
-    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js'
-    script.async = true
-    script.defer = true
-    script.onerror = () => {
-      console.warn('[Turnstile] Script failed to load — bypassing widget')
-      turnstileFailed.value = true
-    }
-    document.head.appendChild(script)
-  }
 })
 
 onUnmounted(() => {

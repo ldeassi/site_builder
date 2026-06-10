@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Callable, Coroutine, Optional
 
@@ -312,14 +313,50 @@ def _generate_data_json(
     return data
 
 
+def _prepare_command(cmd: list[str]) -> tuple[list[str] | str, bool]:
+    """Resolve executables for the current OS (npm.cmd on Windows needs shell)."""
+    if not cmd:
+        raise ValueError("Command must not be empty")
+
+    executable = cmd[0]
+    if sys.platform == "win32":
+        resolved = (
+            shutil.which(executable)
+            or shutil.which(f"{executable}.cmd")
+            or shutil.which(f"{executable}.exe")
+        )
+        if resolved:
+            if resolved.lower().endswith((".cmd", ".bat")):
+                return subprocess.list2cmdline([resolved, *cmd[1:]]), True
+            return [resolved, *cmd[1:]], False
+
+    return cmd, False
+
+
+def _copy_node_modules(src: Path, dst: Path) -> None:
+    """Copy template node_modules (preserves symlinks when supported)."""
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst, symlinks=True)
+
+
 async def _run_command(cmd: list[str], cwd: Path, timeout: int = 180) -> str:
     """Run a shell command asynchronously and return stdout."""
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        cwd=str(cwd),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    prepared, use_shell = _prepare_command(cmd)
+    if use_shell:
+        proc = await asyncio.create_subprocess_shell(
+            prepared,
+            cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    else:
+        proc = await asyncio.create_subprocess_exec(
+            *(prepared if isinstance(prepared, list) else [prepared]),
+            cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
     stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
 
     if proc.returncode != 0:
@@ -417,14 +454,10 @@ async def build_react_site(
         node_modules_dst = build_dir / "node_modules"
 
         if template_node_modules.exists():
-            # Fast path: copy from template dir (preserves symlinks)
+            # Fast path: copy from template dir (preserves symlinks when supported)
             if callback:
                 await callback("Copying pre-installed dependencies...")
-            await _run_command(
-                ["cp", "-a", str(template_node_modules), str(node_modules_dst)],
-                build_dir,
-                timeout=60,
-            )
+            await asyncio.to_thread(_copy_node_modules, template_node_modules, node_modules_dst)
         else:
             # Slow path: fresh install
             if callback:
@@ -548,6 +581,27 @@ async def rebuild_react_site(
         build_dir=str(build_path),
         index_html=index_html,
     )
+
+
+def zip_build_source(build_dir: str) -> bytes:
+    """Zip React project source (excludes node_modules and dist)."""
+    import io
+    import zipfile
+
+    root = Path(build_dir)
+    if not root.exists():
+        raise FileNotFoundError(f"Build directory not found: {build_dir}")
+
+    skip_dirs = {"node_modules", "dist", ".git"}
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for file_path in root.rglob("*"):
+            if not file_path.is_file():
+                continue
+            if skip_dirs.intersection(file_path.relative_to(root).parts):
+                continue
+            archive.write(file_path, file_path.relative_to(root).as_posix())
+    return buffer.getvalue()
 
 
 def cleanup_build(build_dir: str) -> None:

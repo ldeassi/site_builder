@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getDownloadUrl, getApiBase } from '../../services/api'
+import { getDownloadUrl, getDownloadSourceUrl, getApiBase } from '../../services/api'
 
 describe('API Service', () => {
   describe('getDownloadUrl', () => {
@@ -11,6 +11,13 @@ describe('API Service', () => {
     it('handles special characters in job ID', () => {
       const url = getDownloadUrl('abc-def-123-456')
       expect(url).toContain('abc-def-123-456')
+    })
+  })
+
+  describe('getDownloadSourceUrl', () => {
+    it('returns correct source download URL', () => {
+      const url = getDownloadSourceUrl('test-job-123')
+      expect(url).toBe('http://localhost:9405/api/job/test-job-123/download-source')
     })
   })
 

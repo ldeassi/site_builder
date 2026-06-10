@@ -1,7 +1,7 @@
 <template>
   <div class="relative">
     <label for="business-search" class="block text-sm font-medium text-gray-300 mb-2">
-      Business name, Google Maps link, or website URL
+      Business name
     </label>
     <div class="relative">
       <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -16,7 +16,7 @@
         v-model="inputValue"
         type="text"
         :placeholder="autocompleteReady
-          ? 'Search a business name or paste any URL...'
+          ? 'Search business name...'
           : 'Paste a Google Maps link or website URL...'"
         class="w-full pl-12 pr-12 py-3.5 rounded-xl bg-gray-900/50 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent text-base transition-all"
         :disabled="disabled"
@@ -148,6 +148,9 @@ const emit = defineEmits<{
 const props = defineProps<{
   disabled?: boolean
   modelValue?: string
+  /** Bias autocomplete toward dashboard location (optional) */
+  biasLat?: number
+  biasLng?: number
 }>()
 
 const inputRef = ref<HTMLInputElement | null>(null)
@@ -180,10 +183,22 @@ function attachAutocomplete() {
   const google = (window as any).google
   if (!google?.maps?.places) return
 
-  autocompleteInstance = new google.maps.places.Autocomplete(inputRef.value, {
+  const options: Record<string, unknown> = {
     types: ['establishment'],
     fields: ['name', 'formatted_address', 'place_id', 'geometry'],
-  })
+  }
+
+  if (props.biasLat != null && props.biasLng != null) {
+    const delta = 0.35
+    const bounds = new google.maps.LatLngBounds(
+      new google.maps.LatLng(props.biasLat - delta, props.biasLng - delta),
+      new google.maps.LatLng(props.biasLat + delta, props.biasLng + delta),
+    )
+    options.bounds = bounds
+    options.strictBounds = false
+  }
+
+  autocompleteInstance = new google.maps.places.Autocomplete(inputRef.value, options)
 
   autocompleteInstance.addListener('place_changed', () => {
     const place = autocompleteInstance.getPlace()

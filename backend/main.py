@@ -34,11 +34,19 @@ from modules.rate_limiter import (
 )
 from modules.website_scraper import scrape_website, WebsiteData
 from modules.site_generator import generate_site, generate_site_content, GeneratedSite, SiteContent
-from modules.react_builder import build_react_site, rebuild_react_site, cleanup_build, ReactBuildResult, get_available_templates
+from modules.react_builder import (
+    build_react_site,
+    rebuild_react_site,
+    cleanup_build,
+    zip_build_source,
+    ReactBuildResult,
+    get_available_templates,
+)
 from modules.vercel_deployer import deploy_to_vercel, is_vercel_configured
 from modules.cloudflare_deployer import deploy_to_cloudflare, is_cloudflare_configured
 from modules.image_generator import generate_site_images, is_gemini_configured
 from modules.websocket_manager import get_websocket_manager
+from modules.places_search import search_businesses_page, search_businesses_bulk
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -232,6 +240,29 @@ class RedeploySiteRequest(BaseModel):
     """Request body for re-deploying an edited site."""
 
     job_id: str
+
+
+class PlacesSearchRequest(BaseModel):
+    """Paginated business discovery near a location."""
+
+    query: str
+    lat: float
+    lng: float
+    page_token: Optional[str] = None
+    provider: Optional[str] = None  # "new" | "legacy" — set after first page
+    api_key: Optional[str] = None  # Falls back to GOOGLE_MAPS_API_KEY env var
+    referer: Optional[str] = None  # Browser origin for referrer-restricted API keys
+
+
+class PlacesBulkSearchRequest(BaseModel):
+    """Bulk business discovery — multiple category queries, up to 500 results."""
+
+    location_name: str
+    lat: float
+    lng: float
+    max_results: int = 500
+    api_key: Optional[str] = None
+    referer: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -913,6 +944,52 @@ async def download_generated_site(job_id: str):
     )
 
 
+@app.get("/api/job/{job_id}/download-source")
+async def download_generated_site_source(job_id: str):
+    """
+    Download the React project source (pre-build) as a zip.
+
+    Excludes node_modules and dist. Run ``npm install && npm run dev`` locally.
+    """
+    if job_id not in jobs:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+    job = jobs[job_id]
+    if job["status"] != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job is not completed yet. Current status: {job['status']}",
+        )
+
+    result = job.get("result") or {}
+    build_dir = result.get("build_dir")
+    if not build_dir:
+        raise HTTPException(
+            status_code=404,
+            detail="Source project not available for this job (build directory missing).",
+        )
+
+    try:
+        zip_bytes = zip_build_source(build_dir)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to zip build source for job %s", job_id)
+        raise HTTPException(status_code=500, detail=f"Failed to create source zip: {exc}") from exc
+
+    business_name = result.get("business_name", "site")
+    safe_name = "".join(c if c.isalnum() or c in "-_ " else "" for c in business_name)
+    safe_name = safe_name.strip().replace(" ", "-") or "generated-site"
+
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}-source.zip"',
+        },
+    )
+
+
 @app.delete("/api/site/{project_name}")
 async def delete_deployed_site(project_name: str):
     """Delete a deployed site from Cloudflare Pages or Vercel."""
@@ -1190,6 +1267,81 @@ async def get_job_editable_data(job_id: str):
 
     data = _generate_data_json(content, business_data)
     return {"data": data}
+
+
+@app.post("/api/places/search")
+async def places_search_endpoint(request: PlacesSearchRequest):
+    """
+    Paginated Google Places business search (~20 results per page).
+
+    Proxies Places API (New) or legacy Text Search server-side so pagination
+    works reliably (browser-direct calls often return 403).
+    """
+    api_key = request.api_key or os.getenv("GOOGLE_MAPS_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Maps API key missing. Set GOOGLE_MAPS_API_KEY or pass api_key.",
+        )
+
+    provider = request.provider if request.provider in ("new", "legacy") else None
+
+    try:
+        result = await search_businesses_page(
+            api_key=api_key,
+            query=request.query,
+            lat=request.lat,
+            lng=request.lng,
+            page_token=request.page_token,
+            provider=provider,
+            referer=request.referer,
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Places search failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/places/search-bulk")
+async def places_bulk_search_endpoint(request: PlacesBulkSearchRequest):
+    """
+    Fetch up to 500 unique businesses via multiple category searches (server-side).
+    """
+    api_key = request.api_key or os.getenv("GOOGLE_MAPS_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Maps API key missing. Set GOOGLE_MAPS_API_KEY or pass api_key.",
+        )
+
+    max_results = min(max(1, request.max_results), 500)
+
+    try:
+        result = await search_businesses_bulk(
+            api_key=api_key,
+            location_name=request.location_name,
+            lat=request.lat,
+            lng=request.lng,
+            referer=request.referer,
+            max_results=max_results,
+        )
+        if not result["businesses"] and result["errors"]:
+            raise HTTPException(
+                status_code=502,
+                detail=f"All searches failed. First error: {result['errors'][0]}",
+            )
+        return result
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Bulk places search failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/health")

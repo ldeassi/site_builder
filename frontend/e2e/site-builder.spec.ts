@@ -30,26 +30,35 @@ test.describe('Site Builder - Input Phase', () => {
     await page.goto(FRONTEND)
   })
 
-  test('shows Google Maps URL input', async ({ page }) => {
-    // PlacesAutocomplete has placeholder "Search for any business..." or "Paste a Google Maps URL..."
-    const input = page.locator('input[placeholder*="business"]').or(page.locator('input[placeholder*="Google Maps"]')).first()
+  test('shows location search input', async ({ page }) => {
+    const input = page.locator('#location-search').or(
+      page.locator('input[placeholder*="city"]')
+    ).first()
     await expect(input).toBeVisible({ timeout: 10000 })
   })
 
-  test('shows template selection', async ({ page }) => {
-    // Should have template options or a default template name
-    await expect(page.locator('text=modern').or(page.locator('text=Modern')).or(page.locator('text=Template')).first()).toBeVisible({ timeout: 10000 })
+  test('shows find businesses button', async ({ page }) => {
+    const searchBtn = page.locator('button').filter({ hasText: /find businesses/i }).first()
+    await expect(searchBtn).toBeVisible({ timeout: 10000 })
+    await expect(searchBtn).toBeDisabled()
   })
 
-  test('shows deploy target options', async ({ page }) => {
-    // Should have deploy target selector (Cloudflare, Vercel, etc.)
-    const deploySection = page.locator('text=deploy').or(page.locator('text=Deploy')).or(page.locator('text=Hosting')).first()
-    await expect(deploySection).toBeVisible({ timeout: 10000 })
+  test('shows business name input for site builder', async ({ page }) => {
+    const input = page.locator('#business-search').or(
+      page.locator('input[placeholder*="Search business"]')
+    ).first()
+    await expect(input).toBeVisible({ timeout: 10000 })
   })
 
-  test('generate button exists but requires URL', async ({ page }) => {
-    const generateBtn = page.locator('button').filter({ hasText: /generate|build|create/i }).first()
+  test('shows generate site button', async ({ page }) => {
+    const generateBtn = page.locator('button').filter({ hasText: /generate site/i }).first()
     await expect(generateBtn).toBeVisible({ timeout: 10000 })
+    await expect(generateBtn).toBeDisabled()
+  })
+
+  test('shows split dashboard hero', async ({ page }) => {
+    await expect(page.getByText(/Find leads/i).first()).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText(/Build sites/i).first()).toBeVisible({ timeout: 10000 })
   })
 })
 
@@ -73,6 +82,11 @@ test.describe('Site Builder - API Endpoints', () => {
 
   test('GET /api/job/{id}/download returns 404 for missing job', async ({ request }) => {
     const resp = await request.get(`${BACKEND}/api/job/nonexistent-job-id/download`)
+    expect(resp.status()).toBe(404)
+  })
+
+  test('GET /api/job/{id}/download-source returns 404 for missing job', async ({ request }) => {
+    const resp = await request.get(`${BACKEND}/api/job/nonexistent-job-id/download-source`)
     expect(resp.status()).toBe(404)
   })
 

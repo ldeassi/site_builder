@@ -1,12 +1,19 @@
 import { defineStore } from 'pinia'
 import { ref, reactive, computed } from 'vue'
 import {
-  generateSite, getJobStatus, getDownloadUrl, deleteDeployedSite,
+  generateSite, getJobStatus, getDownloadUrl, getDownloadSourceUrl, deleteDeployedSite,
   getJobEditableData, rebuildSite, generateSection, redeploySite,
   getTemplates,
 } from '../services/api'
 import type { TemplateInfo } from '../services/api'
 import { wsService } from '../services/websocket'
+import {
+  searchBusinessesInArea,
+  sliceDiscoveryPage,
+  getDiscoveryPageCount,
+} from '../services/placesDiscovery'
+import type { DiscoveredBusiness, SelectedLocation } from '../types/places'
+import { businessesToCsv, downloadCsvFile, locationToCsvFilename } from '../utils/exportBusinessesCsv'
 
 export interface PipelineStep {
   key: string
@@ -42,7 +49,7 @@ export const PIPELINE_STEPS: PipelineStep[] = [
 
 export const useSiteBuilderStore = defineStore('siteBuilder', () => {
   // ─── Core State ────────────────────────────────────────
-  const phase = ref<'input' | 'progress' | 'result' | 'error'>('input')
+  const phase = ref<'input' | 'discovery' | 'progress' | 'result' | 'error'>('input')
   const mapsUrl = ref('')
   const templateName = ref('modern')
   const availableTemplates = ref<TemplateInfo[]>([{ name: 'modern', label: 'Modern', available: true }])
@@ -58,6 +65,19 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
   const currentMessage = ref('')
   const jobId = ref<string | null>(null)
   const turnstileToken = ref<string | null>(null)  // Cloudflare Turnstile token (Tier 2)
+
+  // ─── Dashboard (location → business discovery page) ───
+  const selectedLocation = ref<SelectedLocation | null>(null)
+  const discoveryAllBusinesses = ref<DiscoveredBusiness[]>([])
+  const discoveredBusinesses = ref<DiscoveredBusiness[]>([])
+  const selectedDiscoveredBusiness = ref<DiscoveredBusiness | null>(null)
+  const isSearchingBusinesses = ref(false)
+  const discoverySearchProgress = ref('')
+  const businessSearchError = ref('')
+  const businessSearchDebug = ref<string[]>([])
+  const discoveryPage = ref(1)
+  const hasNextDiscoveryPage = ref(false)
+  const discoveryNoWebsiteOnly = ref(false)
 
   // ─── URL Detection ───────────────────────────────────
   function detectUrlType(url: string): 'none' | 'maps' | 'website' {
@@ -123,6 +143,11 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     return getDownloadUrl(jobId.value)
   })
 
+  const downloadSourceUrl = computed(() => {
+    if (!jobId.value) return '#'
+    return getDownloadSourceUrl(jobId.value)
+  })
+
   const previewWidth = computed(() => {
     switch (previewDevice.value) {
       case 'mobile': return '375px'
@@ -130,6 +155,61 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
       default: return '100%'
     }
   })
+
+  const hasPrevDiscoveryPage = computed(() => discoveryPage.value > 1)
+
+  const discoveryFilteredBusinesses = computed(() => {
+    if (!discoveryNoWebsiteOnly.value) return discoveryAllBusinesses.value
+    return discoveryAllBusinesses.value.filter(b => !b.hasWebsite)
+  })
+
+  const discoveryTotalCount = computed(() => discoveryFilteredBusinesses.value.length)
+
+  const discoveryTotalPages = computed(() => getDiscoveryPageCount(discoveryFilteredBusinesses.value.length))
+
+  const discoveryResultsLabel = computed(() => {
+    const total = discoveryTotalCount.value
+    const pages = discoveryTotalPages.value
+    if (total === 0) {
+      return discoveryNoWebsiteOnly.value
+        ? 'No businesses without a website'
+        : 'No businesses found'
+    }
+    const filterNote = discoveryNoWebsiteOnly.value ? ' · no website only' : ''
+    return `${total} businesses${filterNote} · Page ${discoveryPage.value} of ${pages}`
+  })
+
+  function applyDiscoveryPage(page: number) {
+    const filtered = discoveryFilteredBusinesses.value
+    const totalPages = getDiscoveryPageCount(filtered.length)
+    if (totalPages === 0) {
+      discoveredBusinesses.value = []
+      discoveryPage.value = 1
+      hasNextDiscoveryPage.value = false
+      return
+    }
+    const safePage = Math.min(Math.max(1, page), totalPages)
+    discoveryPage.value = safePage
+    discoveredBusinesses.value = sliceDiscoveryPage(filtered, safePage)
+    hasNextDiscoveryPage.value = safePage < totalPages
+  }
+
+  function setDiscoveryNoWebsiteOnly(enabled: boolean) {
+    discoveryNoWebsiteOnly.value = enabled
+    applyDiscoveryPage(1)
+  }
+
+  function exportNoWebsiteBusinessesCsv() {
+    const locationName = selectedLocation.value?.name ?? 'businesses'
+    const noWebsite = discoveryAllBusinesses.value.filter(b => !b.hasWebsite)
+    if (noWebsite.length === 0) {
+      businessSearchError.value = 'No businesses without a website to export.'
+      return
+    }
+    businessSearchError.value = ''
+    const filename = locationToCsvFilename(locationName)
+    downloadCsvFile(businessesToCsv(noWebsite), filename)
+  }
 
   // ─── Step Helpers ──────────────────────────────────────
   function stepStatus(key: string): 'completed' | 'active' | 'pending' {
@@ -291,6 +371,95 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     }
   }
 
+  function resetDashboardSearch(clearLocation = false) {
+    discoveryAllBusinesses.value = []
+    discoveredBusinesses.value = []
+    selectedDiscoveredBusiness.value = null
+    businessSearchError.value = ''
+    businessSearchDebug.value = []
+    discoverySearchProgress.value = ''
+    discoveryPage.value = 1
+    hasNextDiscoveryPage.value = false
+    discoveryNoWebsiteOnly.value = false
+    isSearchingBusinesses.value = false
+    if (clearLocation) {
+      selectedLocation.value = null
+      mapsUrl.value = ''
+      inputUrl.value = ''
+      inputUrlType.value = 'none'
+      businessNameInput.value = ''
+      businessCategoryInput.value = ''
+    }
+  }
+
+  function goBackToDashboard() {
+    phase.value = 'input'
+    resetDashboardSearch(false)
+  }
+
+  function setSelectedLocation(location: SelectedLocation) {
+    selectedLocation.value = location
+    businessSearchError.value = ''
+  }
+
+  function clearSelectedLocation() {
+    selectedLocation.value = null
+    resetDashboardSearch(true)
+  }
+
+  function selectDiscoveredBusiness(business: DiscoveredBusiness) {
+    selectedDiscoveredBusiness.value = business
+    mapsUrl.value = business.mapsUrl
+    inputUrl.value = business.mapsUrl
+    inputUrlType.value = 'maps'
+    businessNameInput.value = business.name
+    businessCategoryInput.value = business.category
+  }
+
+  async function searchBusinessesInLocation() {
+    if (!selectedLocation.value || isSearchingBusinesses.value) return
+
+    isSearchingBusinesses.value = true
+    businessSearchError.value = ''
+    businessSearchDebug.value = []
+    discoveryAllBusinesses.value = []
+    discoveredBusinesses.value = []
+    selectedDiscoveredBusiness.value = null
+    discoveryPage.value = 1
+    hasNextDiscoveryPage.value = false
+    discoverySearchProgress.value = 'Starting search…'
+    phase.value = 'discovery'
+
+    try {
+      console.log('[siteBuilderStore] Bulk discovery for:', selectedLocation.value?.name)
+      const result = await searchBusinessesInArea(selectedLocation.value, msg => {
+        discoverySearchProgress.value = msg
+      })
+      discoveryAllBusinesses.value = result.businesses
+      businessSearchDebug.value = result.debugLines
+      if (result.errors.length) {
+        businessSearchDebug.value.push(`Warnings: ${result.errors.join('; ')}`)
+      }
+      applyDiscoveryPage(1)
+      console.log('[siteBuilderStore] Loaded', result.businesses.length, 'businesses,', discoveryTotalPages.value, 'UI pages')
+      if (result.businesses.length === 0) {
+        businessSearchError.value = 'No businesses found in this area. Try a larger city or different location.'
+      }
+    } catch (err: any) {
+      console.error('[siteBuilderStore] Business search failed:', err)
+      businessSearchError.value = err.message || 'Failed to search businesses.'
+      phase.value = 'input'
+    } finally {
+      isSearchingBusinesses.value = false
+      discoverySearchProgress.value = ''
+    }
+  }
+
+  function setDiscoveryPage(page: number) {
+    if (page < 1 || isSearchingBusinesses.value) return
+    applyDiscoveryPage(page)
+  }
+
   function resetToInput() {
     phase.value = 'input'
     isGenerating.value = false
@@ -317,6 +486,8 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     jobId.value = null
     undoStack.value = []
     redoStack.value = []
+    resetDashboardSearch()
+    selectedLocation.value = null
   }
 
   async function viewSite(site: GeneratedSite) {
@@ -608,6 +779,10 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     phase, mapsUrl, templateName, availableTemplates, deployTarget, businessContext, websiteUrl, isGenerating,
     inputUrl, inputUrlType, businessNameInput, businessCategoryInput, canGenerate,
     wsConnected, currentMessage, jobId, turnstileToken,
+    selectedLocation, discoveryAllBusinesses, discoveredBusinesses, selectedDiscoveredBusiness,
+    isSearchingBusinesses, discoverySearchProgress, businessSearchError, businessSearchDebug,
+    discoveryPage, discoveryTotalCount, discoveryTotalPages, discoveryNoWebsiteOnly,
+    hasNextDiscoveryPage, hasPrevDiscoveryPage, discoveryResultsLabel,
     completedSteps, activeStep, stepMessages,
     logs, resultHtml, resultTitle, resultBusinessName,
     resultDeployUrl, resultDeployProvider, seoData,
@@ -619,9 +794,12 @@ export const useSiteBuilderStore = defineStore('siteBuilder', () => {
     editorError, iframeRef,
     undoStack, redoStack, canUndo, canRedo,
     // Computed
-    downloadUrl, previewWidth,
+    downloadUrl, downloadSourceUrl, previewWidth,
     // Actions
     stepStatus, addLog, startGeneration, resetToInput, setInputUrl, detectUrlType,
+    setSelectedLocation, clearSelectedLocation, searchBusinessesInLocation,
+    selectDiscoveredBusiness, resetDashboardSearch, goBackToDashboard, setDiscoveryPage, setDiscoveryNoWebsiteOnly,
+    exportNoWebsiteBusinessesCsv,
     viewSite, deleteSite, loadSiteHistory, loadTemplates, saveSiteHistory,
     initWebSocket, destroyWebSocket,
     // Editor Actions
